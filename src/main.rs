@@ -1,12 +1,60 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use reqwest::blocking::Client;
-use reqwest::header::{AUTHORIZATION, HeaderValue};
 use std::thread;
 use std::time::{SystemTime, Duration};
+use std::{env, fs};
 use chrono::{DateTime, Local};
-use std::env;
-use dotenv::dotenv;
+use config::Config;
+use reqwest::blocking::Client;
+use reqwest::header::{AUTHORIZATION, HeaderValue};
+mod config;
+
+/// Reads the path to the configuration file.
+/// * Throws an error if the config does not exist.
+fn get_config_path() -> Result<String, String> {
+    if let Ok(exe_path) = env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            let config_path = exe_dir.join("wanmonitor.conf");
+            if config_path.exists() {
+                return Ok(config_path.to_string_lossy().to_string());
+            } else {
+                return Err(format!("Config file '{}' does not exist.", config_path.display()));
+            }
+        }
+    }
+
+    Err("Failed to determine the executable path.".to_string())
+}
+
+/// Loads configuration from a TOML file.
+/// * Throws an error if the config file is not readable.
+/// * Throws an error if the config file has syntax error. 
+fn load_config() -> Config {
+    // Read config path
+    let config_path = get_config_path().unwrap_or_else(|e| {
+        eprintln!("Error: {}", e);
+        std::process::exit(1);
+    });
+
+    // Debug message
+    log::debug!("Loading config from: {}", config_path);
+    
+    // Read config file
+    let config_str = fs::read_to_string(&config_path)
+        .unwrap_or_else(|_e_| {
+            eprintln!("Error: Cannot read config file '{}'", config_path);
+            eprintln!("Please ensure the file exists and is readable.");
+            std::process::exit(1);
+        });
+    
+    // Parse TOML
+    toml::from_str(&config_str)
+        .unwrap_or_else(|_e_| {
+            eprintln!("Error: Failed to parse TOML config file '{}'", config_path);
+            ("Please check the syntax of your configuration file.");
+            std::process::exit(1);
+        })
+}
 
 /// Sends a notification message to an ntfy server.
 ///
@@ -72,31 +120,12 @@ fn is_internet_up(client: &reqwest::blocking::Client, url: &str) -> bool {
 /// 6. Sends notifications when internet goes down or comes back up
 /// 7. Includes downtime duration in restoration notifications
 fn main() {
-    dotenv().ok();
-    // Initialize logger
-    let debug = env::var("DEBUG").unwrap_or_else(|_| "false".to_string());
-    let log_level = if debug.to_lowercase() == "true" { "debug" } else { "info" };
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(log_level)).init();
+    // Load configuration from TOML file
+    let config = load_config();
 
-    // Load .env file, check that the necessary variables exists
-    let url = env::var("NTFY_URL").expect("NTFY_URL must be set");
-    let title = env::var("NTFY_TITLE").expect("NTFY_TITLE must be set");
-    let token = env::var("NTFY_TOKEN").expect("NTFY_TOKEN must be set");
-    let tags = env::var("NTFY_TAG").unwrap_or_else(|_| "warning".to_string());
-    let priority = env::var("NTFY_PRIORITY").unwrap_or_else(|_| "default".to_string());
-    let urls = env::var("CHECK_URLS")
-        .expect("CHECK_URLS must be set")
-        .split(',')
-        .map(|s| s.trim().to_string())
-        .collect::<Vec<String>>();
-    let interval: u64 = env::var("CHECK_INTERVAL")
-    .unwrap_or_else(|_| "5".to_string())
-    .parse()
-    .expect("CHECK_INTERVAL must be a valid integer");
-    let timeout: u64 = env::var("CHECK_TIMEOUT")
-        .unwrap_or_else(|_| "60".to_string())
-        .parse()
-        .expect("CHECK_TIMEOUT must be a valid integer");
+    // Initialize logger
+    let log_level = if config.debug() { "debug" } else { "info" };
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(log_level)).init();
 
     // Create HTTP client for connectivity checks
     let http_client = reqwest::blocking::Client::builder()
@@ -112,8 +141,8 @@ fn main() {
     log::info!("Starting...");
 
     // Send a test notification to verify ntfy setup
-    if debug.to_lowercase() == "true" {
-        match send_ntfy(&url, &title, &token, &tags, "wanmonitor started: ntfy test message", &priority) {
+    if config.debug() {
+        match send_ntfy(&config.ntfy_url, &config.ntfy_title, &config.ntfy_token, config.ntfy_tag(), "wanmonitor started: ntfy test message", config.ntfy_priority()) {
             Ok(_) => log::info!("Successfully sent test notification to ntfy."),
             Err(e) => log::error!("Failed to send test notification to ntfy: {}", e),
         }
@@ -122,14 +151,15 @@ fn main() {
     // Set up graceful shutdown flag
     let running = Arc::new(AtomicBool::new(true));
     let r = running.clone();
-    let url_clone = url.clone();
-    let title_clone = title.clone();
-    let token_clone = token.clone();
-    let tags_clone = tags.clone();
-    let priority_clone = priority.clone();
+    let url_clone = config.ntfy_url.clone();
+    let title_clone = config.ntfy_title.clone();
+    let token_clone = config.ntfy_token.clone();
+    let tags_clone = config.ntfy_tag().to_string();
+    let priority_clone = config.ntfy_priority().to_string();
+    let debug_clone = config.debug();
     ctrlc::set_handler(move || {
         log::info!("Shutdown signal received. Exiting...");
-        if debug.to_lowercase() == "true" {
+        if debug_clone {
             let _ = send_ntfy(&url_clone, &title_clone, &token_clone, &tags_clone, "wanmonitor shutting down", &priority_clone);
         }
         r.store(false, Ordering::SeqCst);
@@ -138,7 +168,7 @@ fn main() {
     // Main Loop
     while running.load(Ordering::SeqCst) {
         // Check connection
-            let internet_up = urls.iter().any(|url| is_internet_up(&http_client, url));
+            let internet_up = config.check_urls.iter().any(|url| is_internet_up(&http_client, url));
             if internet_up {
             // If the connection was down before but is now up, send the total outage time
             if was_down {
@@ -161,8 +191,8 @@ fn main() {
                             start_str, duration_str
                         );
                         // Reduce unnecessary notifications
-                        if total_secs > timeout {
-                            let _ = send_ntfy(&url, &title, &token, &tags, &msg, &priority);
+                        if total_secs > config.check_timeout() {
+                            let _ = send_ntfy(&config.ntfy_url, &config.ntfy_title, &config.ntfy_token, config.ntfy_tag(), &msg, config.ntfy_priority());
                             log::info!("{}", msg)
                         }
                     }
@@ -182,11 +212,11 @@ fn main() {
                     "Internet outage detected at {}",
                     chrono::DateTime::<chrono::Local>::from(SystemTime::now()).format("%Y-%m-%d %H:%M:%S")
                 );
-                let _ = send_ntfy(&url, &title, &token, &tags, &msg, &priority);
+                let _ = send_ntfy(&config.ntfy_url, &config.ntfy_title, &config.ntfy_token, config.ntfy_tag(), &msg, config.ntfy_priority());
                 log::warn!("{}", msg);
                 was_down = true;
             }
         }
-        thread::sleep(Duration::from_secs(interval));
+        thread::sleep(Duration::from_secs(config.check_interval()));
     }
 }
