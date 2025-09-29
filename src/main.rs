@@ -7,7 +7,9 @@ use chrono::{DateTime, Local};
 use config::Config;
 use reqwest::blocking::Client;
 use reqwest::header::{AUTHORIZATION, HeaderValue};
+use warp::Filter;
 mod config;
+mod metrics;
 
 /// Reads the path to the configuration file.
 /// * Throws an error if the config does not exist.
@@ -127,6 +129,17 @@ fn main() {
     let log_level = if config.debug() { "debug" } else { "info" };
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(log_level)).init();
 
+    // Start the metrics server in a separate thread
+    let metrics_route = warp::path("metrics").and_then(metrics::metrics_handler);
+    thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            warp::serve(metrics_route)
+                .run(([127, 0, 0, 1], 3030))
+                .await;
+        });
+    });
+
     // Create HTTP client for connectivity checks
     let http_client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(3))
@@ -212,6 +225,10 @@ fn main() {
                     "Internet outage detected at {}",
                     chrono::DateTime::<chrono::Local>::from(SystemTime::now()).format("%Y-%m-%d %H:%M:%S")
                 );
+
+                // Increment the outages counter
+                metrics::increment_outages();
+
                 let _ = send_ntfy(&config.ntfy_url, &config.ntfy_title, &config.ntfy_token, config.ntfy_tag(), &msg, config.ntfy_priority());
                 log::warn!("{}", msg);
                 was_down = true;
