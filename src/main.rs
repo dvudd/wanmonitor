@@ -53,8 +53,8 @@ fn load_config() -> Config {
     toml::from_str(&config_str)
         .unwrap_or_else(|_e_| {
             eprintln!("Error: Failed to parse TOML config file '{}'", config_path);
-            ("Please check the syntax of your configuration file.");
-            std::process::exit(1);
+            eprintln!("Please check the syntax of your configuration file.");
+            std::proce:wss::exit(1);
         })
 }
 
@@ -135,7 +135,7 @@ fn main() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             warp::serve(metrics_route)
-                .run(([127, 0, 0, 1], 3030))
+                .run(([127, 0, 0, 1], 3030)) // CHANGE THIS: the port should be set from config file
                 .await;
         });
     });
