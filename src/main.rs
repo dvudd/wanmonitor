@@ -184,6 +184,8 @@ fn main() {
             let internet_up = config.check_urls.iter().any(|url| is_internet_up(&http_client, url));
             if internet_up {
             // If the connection was down before but is now up, send the total outage time
+            metrics::INTERNET_STATUS.set(1);
+            metrics::TOTAL_UPTIME.inc_by(config.check_interval());
             if was_down {
                 // Internet just came back up
                 if let Some(start) = down_since {
@@ -218,6 +220,8 @@ fn main() {
             }
         } else {
             // If the connection goes down, start logging the time and send a notification
+            metrics::INTERNET_STATUS.set(0);
+            metrics::increment_downtime(config.check_interval()); 
             if !was_down {
                 // Internet just went down
                 down_since = Some(SystemTime::now());
