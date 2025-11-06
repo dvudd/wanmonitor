@@ -54,7 +54,7 @@ fn load_config() -> Config {
         .unwrap_or_else(|_e_| {
             eprintln!("Error: Failed to parse TOML config file '{}'", config_path);
             eprintln!("Please check the syntax of your configuration file.");
-            std::proce:wss::exit(1);
+            std::process::exit(1);
         })
 }
 
