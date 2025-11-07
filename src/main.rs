@@ -131,11 +131,12 @@ fn main() {
 
     // Start the metrics server in a separate thread
     let metrics_route = warp::path("metrics").and_then(metrics::metrics_handler);
+    let metrics_port = config.prometheus_port();
     thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             warp::serve(metrics_route)
-                .run(([127, 0, 0, 1], 3030)) // CHANGE THIS: the port should be set from config file
+                .run(([127, 0, 0, 1], metrics_port))
                 .await;
         });
     });
