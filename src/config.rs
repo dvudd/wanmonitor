@@ -11,6 +11,7 @@ pub struct Config {
     pub check_interval: Option<u64>,
     pub check_timeout: Option<u64>,
     pub debug: Option<bool>,
+    pub prometheus_port: Option<u16>,
 }
 
 impl Config {
@@ -32,5 +33,9 @@ impl Config {
 
     pub fn debug(&self) -> bool {
         self.debug.unwrap_or(false)
+    }
+
+    pub fn prometheus_port(&self) -> u16 {
+          self.prometheus_port.unwrap_or(3030)
     }
 }
