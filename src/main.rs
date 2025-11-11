@@ -132,13 +132,19 @@ fn main() {
     // Start the metrics server in a separate thread
     let metrics_route = warp::path("metrics").and_then(metrics::metrics_handler);
     let metrics_port = config.prometheus_port();
+    let running_clone = running.clone();
     thread::spawn(move || {
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        rt.block_on(async {
-            warp::serve(metrics_route)
-                .run(([127, 0, 0, 1], metrics_port))
-                .await;
-        });
+      let rt = tokio::runtime::Runtime::new().unwrap();
+      rt.block_on(async {
+          let (_addr, server) = warp::serve(metrics_route)
+              .bind_with_graceful_shutdown(([127, 0, 0, 1], metrics_port), async move {
+                  // Wait until running becomes false
+                  while running_clone.load(Ordering::SeqCst) {
+                      tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                  }
+              });
+          server.await;
+      });
     });
 
     // Create HTTP client for connectivity checks
