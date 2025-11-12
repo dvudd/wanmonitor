@@ -180,7 +180,9 @@ fn main() {
     ctrlc::set_handler(move || {
         log::info!("Shutdown signal received. Exiting...");
         if debug_clone {
-            let _ = send_ntfy(&url_clone, &title_clone, &token_clone, &tags_clone, "wanmonitor shutting down", &priority_clone);
+            if let Err(e) = send_ntfy(&url_clone, &title_clone, &token_clone, &tags_clone, "wanmonitor shutting down", &priority_clone) {
+                log::error!("Failed to send shutdown notification: {}", e);
+            }
         }
         r.store(false, Ordering::SeqCst);
     }).expect("Error setting Ctrl-C handler");
@@ -214,7 +216,9 @@ fn main() {
                         );
                         // Reduce unnecessary notifications
                         if total_secs > config.check_timeout() {
-                            let _ = send_ntfy(&config.ntfy_url, &config.ntfy_title, &config.ntfy_token, config.ntfy_tag(), &msg, config.ntfy_priority());
+                            if let Err(e) = send_ntfy(&config.ntfy_url, &config.ntfy_title, &config.ntfy_token, config.ntfy_tag(), &msg, config.ntfy_priority()) {
+                                log::error!("Failed to send restoration notification: {}", e);
+                            }
                             log::info!("{}", msg)
                         }
                     }
@@ -240,7 +244,9 @@ fn main() {
                 // Increment the outages counter
                 metrics::increment_outages();
 
-                let _ = send_ntfy(&config.ntfy_url, &config.ntfy_title, &config.ntfy_token, config.ntfy_tag(), &msg, config.ntfy_priority());
+                if let Err(e) = send_ntfy(&config.ntfy_url, &config.ntfy_title, &config.ntfy_token, config.ntfy_tag(), &msg, config.ntfy_priority()) {
+                    log::error!("Failed to send outage notification: {}", e);
+                }
                 log::warn!("{}", msg);
                 was_down = true;
             }
