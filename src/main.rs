@@ -14,17 +14,14 @@ mod metrics;
 /// Reads the path to the configuration file.
 /// * Throws an error if the config does not exist.
 fn get_config_path() -> Result<String, String> {
-    if let Ok(exe_path) = env::current_exe() {
-        if let Some(exe_dir) = exe_path.parent() {
+    if let Ok(exe_path) = env::current_exe() && let Some(exe_dir) = exe_path.parent() {
             let config_path = exe_dir.join("wanmonitor.conf");
             if config_path.exists() {
                 return Ok(config_path.to_string_lossy().to_string());
             } else {
                 return Err(format!("Config file '{}' does not exist.", config_path.display()));
             }
-        }
     }
-
     Err("Failed to determine the executable path.".to_string())
 }
 
@@ -129,17 +126,21 @@ fn main() {
     let log_level = if config.debug() { "debug" } else { "info" };
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(log_level)).init();
 
+    // Set up graceful shutdown flag
+    let running = Arc::new(AtomicBool::new(true));
+
     // Start the metrics server in a separate thread
     let metrics_route = warp::path("metrics").and_then(metrics::metrics_handler);
     let metrics_port = config.prometheus_port();
-    let running_clone = running.clone();
+    let running_metrics = running.clone();
     thread::spawn(move || {
+      let running_inner = running_metrics.clone();
       let rt = tokio::runtime::Runtime::new().unwrap();
       rt.block_on(async {
           let (_addr, server) = warp::serve(metrics_route)
               .bind_with_graceful_shutdown(([127, 0, 0, 1], metrics_port), async move {
                   // Wait until running becomes false
-                  while running_clone.load(Ordering::SeqCst) {
+                  while running_inner.load(Ordering::SeqCst) {
                       tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                   }
               });
@@ -168,9 +169,8 @@ fn main() {
         }
     }
 
-    // Set up graceful shutdown flag
-    let running = Arc::new(AtomicBool::new(true));
-    let r = running.clone();
+    // Set up graceful shutdown handler
+    let running_ctrlc = running.clone();
     let url_clone = config.ntfy_url.clone();
     let title_clone = config.ntfy_title.clone();
     let token_clone = config.ntfy_token.clone();
@@ -179,12 +179,10 @@ fn main() {
     let debug_clone = config.debug();
     ctrlc::set_handler(move || {
         log::info!("Shutdown signal received. Exiting...");
-        if debug_clone {
-            if let Err(e) = send_ntfy(&url_clone, &title_clone, &token_clone, &tags_clone, "wanmonitor shutting down", &priority_clone) {
+        if debug_clone && let Err(e) = send_ntfy(&url_clone, &title_clone, &token_clone, &tags_clone, "wanmonitor shutting down", &priority_clone) {
                 log::error!("Failed to send shutdown notification: {}", e);
-            }
         }
-        r.store(false, Ordering::SeqCst);
+        running_ctrlc.store(false, Ordering::SeqCst);
     }).expect("Error setting Ctrl-C handler");
 
     // Main Loop
