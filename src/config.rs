@@ -36,6 +36,6 @@ impl Config {
     }
 
     pub fn prometheus_port(&self) -> u16 {
-          self.prometheus_port.unwrap_or(3030)
+        self.prometheus_port.unwrap_or(3030)
     }
 }

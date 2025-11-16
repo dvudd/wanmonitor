@@ -1,4 +1,6 @@
-use prometheus::{register_int_counter, register_int_gauge, IntCounter, IntGauge, Encoder, TextEncoder, gather};
+use prometheus::{
+    Encoder, IntCounter, IntGauge, TextEncoder, gather, register_int_counter, register_int_gauge,
+};
 
 lazy_static::lazy_static! {
     pub static ref TOTAL_DOWNTIME: IntCounter = register_int_counter!("total_downtime_seconds", "Total downtime in seconds").unwrap();
