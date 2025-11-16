@@ -4,7 +4,7 @@ This will monitor your WAN connection and send a notification via NTFY when it g
 
 To build:
 ```rust
-cargo build --relase
+cargo build --release
 ```
 
 ### Configuration
@@ -19,5 +19,6 @@ ntfy_priority = "default"
 check_urls = ["https://1.1.1.1", "https://8.8.8.8", "https://www.google.com"]
 check_interval = 5
 check_timeout = 60
+prometheus_port = 9100
 debug = false
 ```
